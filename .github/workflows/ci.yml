@@ -1,0 +1,71 @@
+name: Blog CI
+
+on:
+  push:
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: blog-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-test-publish:
+    name: Build, test, coverage, and publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v6
+        with:
+          global-json-file: global.json
+
+      - name: Restore dependencies
+        run: dotnet restore MarketBlog.sln -m:1
+
+      - name: Build solution
+        run: dotnet build MarketBlog.sln --configuration Release --no-restore -m:1
+
+      - name: Run unit tests and collect coverage
+        run: >-
+          dotnet test MarketBlog.Tests/MarketBlog.Tests.csproj
+          --configuration Release
+          --no-build
+          --no-restore
+          --settings coverage.runsettings
+          --collect:"XPlat Code Coverage"
+          --logger "trx;LogFileName=tests.trx"
+          --results-directory TestResults
+
+      - name: Publish deployable app
+        run: >-
+          dotnet publish MarketBlog/MarketBlog.csproj
+          --configuration Release
+          --no-restore
+          --no-build
+          --output artifacts/MarketBlog
+
+      - name: Upload test and coverage reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-and-coverage-reports
+          path: TestResults/
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload deployable app
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: MarketBlog-release
+          path: artifacts/MarketBlog/
+          if-no-files-found: error
+          retention-days: 14
+
